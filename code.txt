@@ -1,0 +1,64 @@
+import cv2
+import torch
+from picamera2 import Picamera2
+from yolov7.models.experimental import attempt_load
+from yolov7.utils.general import non_max_suppression, scale_coords
+from yolov7.utils.datasets import letterbox
+from yolov7.utils.torch_utils import select_device
+import numpy as np
+
+# Initialize PiCamera
+picam2 = Picamera2()
+picam2.preview_configuration.main.size = (640, 480)  # Set resolution
+picam2.preview_configuration.main.format = "RGB888"
+picam2.preview_configuration.align()
+picam2.configure("preview")
+picam2.start()
+
+# Load YOLOv7 model
+device = select_device('')  # Auto-select CPU or GPU
+weights = 'yolov7.pt'  # Path to YOLOv7 weights
+model = attempt_load(weights, map_location=device)  # Load model
+model.eval()
+
+# Load COCO class names
+with open("coco.txt", "r") as f:
+    class_names = f.read().strip().split("\n")
+
+# Function for processing each frame
+def process_frame(frame):
+    img = letterbox(frame, new_shape=(640, 640))[0]  # Resize
+    img = img[:, :, ::-1].transpose(2, 0, 1)  # Convert to RGB and rearrange channels
+    img = np.ascontiguousarray(img)
+    img = torch.from_numpy(img).float().div(255.0).unsqueeze(0).to(device)  # Normalize and convert to tensor
+    
+    # Inference
+    with torch.no_grad():
+        pred = model(img)[0]
+    pred = non_max_suppression(pred)
+
+    # Process detections
+    for det in pred:  # detections per image
+        if len(det):
+            det[:, :4] = scale_coords(img.shape[2:], det[:, :4], frame.shape).round()
+            for *xyxy, conf, cls in det:
+                x1, y1, x2, y2 = map(int, xyxy)
+                class_id = int(cls)
+                label = f"{class_names[class_id]} {conf:.2f}"
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Draw bounding box
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)  # Label
+    return frame
+
+# Main loop for live detection
+try:
+    while True:
+        frame = picam2.capture_array()  # Capture frame from PiCamera
+        frame = process_frame(frame)   # Run detection
+        cv2.imshow("Live Detection", frame)  # Display frame
+        
+        # Break on 'q' key press
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+finally:
+    cv2.destroyAllWindows()
+    picam2.stop()
