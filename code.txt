@@ -1,0 +1,35 @@
+from picamera2 import Picamera2
+import time
+import torch
+import cv2
+
+# Initialize picamera2
+picam2 = Picamera2()
+picam2.configure(picam2.create_still_configuration())
+picam2.start()
+
+# Load YOLOv7 model
+model = torch.hub.load('ultralytics/yolov7', 'yolov7', pretrained=False)
+model.load_state_dict(torch.load('/path/to/your/custom_model.pth'))
+device = torch.device('cpu')
+model.to(device)
+
+while True:
+    # Capture an image from the camera
+    image = picam2.capture_array()
+
+    # Perform YOLOv7 inference
+    results = model(image)
+
+    # Render the results
+    results.render()
+
+    # Display the frame
+    cv2.imshow("YOLOv7 Detection", results.imgs[0])
+
+    # Exit on 'q' key press
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+picam2.stop()
+cv2.destroyAllWindows()
