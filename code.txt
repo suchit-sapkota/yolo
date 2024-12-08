@@ -1,0 +1,58 @@
+from picamera2 import Picamera2
+import time
+import torch
+import cv2
+import numpy as np
+
+# Initialize picamera2
+picam2 = Picamera2()
+picam2.configure(picam2.create_still_configuration())
+picam2.start()
+
+# Import YOLOv7 model from the local clone
+from models.experimental import attempt_load
+
+# Load the YOLOv7 model (make sure to adjust the path to your weights)
+model = attempt_load('/path/to/your/custom_model.pth', map_location=torch.device('cpu'))
+
+# Set the model to evaluation mode
+model.eval()
+
+# Define the image size expected by YOLOv7 (640x640 for default)
+img_size = 640
+
+while True:
+    # Capture an image from the camera
+    image = picam2.capture_array()
+
+    # Convert the image from RGB to BGR (OpenCV uses BGR format)
+    image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    # Resize image to the required input size for YOLOv7 (640x640)
+    img_resized = cv2.resize(image_bgr, (img_size, img_size))
+
+    # Normalize the image and convert to tensor
+    img_normalized = img_resized / 255.0  # Normalize to [0, 1]
+    img_tensor = torch.from_numpy(img_normalized).float().permute(2, 0, 1).unsqueeze(0)  # CxHxW format
+    img_tensor = img_tensor.to(torch.device('cpu'))  # Move the tensor to CPU
+
+    # Perform YOLOv7 inference
+    with torch.no_grad():
+        results = model(img_tensor)
+
+    # Render results
+    results.render()  # This will add the bounding boxes to the image
+
+    # Get the image with the bounding boxes
+    output_img = results.imgs[0]
+
+    # Display the frame with bounding boxes
+    cv2.imshow("YOLOv7 Detection", output_img)
+
+    # Exit on 'q' key press
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Stop the camera and close OpenCV window
+picam2.stop()
+cv2.destroyAllWindows()
