@@ -1,0 +1,42 @@
+import processing.serial.*;
+
+Serial myPort;  // Create a serial port object
+int angle;
+int distance;
+
+void setup() {
+  size(480, 320);  // Set a smaller window size (300x300)
+  background(255);  // Set the background color to white
+
+  // Open the serial port that Arduino is connected to
+  myPort = new Serial(this, "/dev/ttyUSB0", 9600);  // Adjust the port if necessary
+  frameRate(30);  // Set the frame rate to update every 30 ms
+}
+
+void draw() {
+  background(255);  // Clear the screen every frame
+
+  // Draw the center of the radar
+  translate(width / 2, height / 2);  // Move the origin to the center of the screen
+  stroke(0);  // Set stroke color to black
+  noFill();
+  ellipse(0, 0, 200, 200);  // Radar outer circle with smaller size (200px diameter)
+  
+  // Draw the scanning lines
+  float radAngle = radians(angle);  // Convert angle to radians
+  float x = cos(radAngle) * distance;  // X coordinate of the point
+  float y = sin(radAngle) * distance;  // Y coordinate of the point
+
+  stroke(0);
+  line(0, 0, x, y);  // Draw a line from center to the distance point
+  
+  // Send command to Arduino for the next scan
+  if (myPort.available() > 0) {
+    String data = myPort.readStringUntil('\n');
+    if (data != null) {
+      String[] parts = trim(data).split(",");
+      angle = int(parts[0]);  // Read the angle from serial
+      distance = int(parts[1]);  // Read the distance from serial
+    }
+  }
+}
