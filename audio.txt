@@ -1,0 +1,13 @@
+import sounddevice as sd
+import numpy as np
+from scipy.io import wavfile
+
+# Replace with your .wav file path
+file_path = 'path_to_audio_file.wav'
+
+# Read the audio file
+samplerate, data = wavfile.read(file_path)
+
+# Play the audio file
+sd.play(data, samplerate)
+sd.wait()  # Wait until the sound has finished playing
