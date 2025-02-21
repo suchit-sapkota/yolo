@@ -1,0 +1,129 @@
+from picamera2 import Picamera2
+import cv2
+import numpy as np
+import onnxruntime
+import pygame
+import threading
+import time
+
+# Initialize picamera2
+picam2 = Picamera2()
+picam2.configure(picam2.create_preview_configuration(main={"size": (640, 480)}))
+picam2.start()
+
+# Load YOLOv7 ONNX model using ONNX Runtime
+session = onnxruntime.InferenceSession("lastmodel.onnx")
+input_name = session.get_inputs()[0].name
+
+# Set input size for the model
+INPUT_WIDTH = 416
+INPUT_HEIGHT = 416
+
+# Set class names (Update with your dataset labels)
+class_names = ["monkey", "not_monkey"]  # Update this!
+
+# Display screen size
+screen_width = 800
+screen_height = 480
+
+# Path to audio file (change to your .wav file)
+audio_file = "/path/to/monkey_detected.wav"
+
+# Initialize Pygame mixer
+pygame.mixer.init()
+pygame.mixer.music.set_volume(1.0)  # Ensure sound is loud enough
+
+# Cooldown settings for playing sound
+last_play_time = 0
+cooldown = 10  # Cooldown in seconds
+
+# Function to play audio
+def play_sound():
+    pygame.mixer.music.load(audio_file)
+    pygame.mixer.music.play()
+
+# Function for optimized Non-Max Suppression (NMS)
+def non_max_suppression(predictions, conf_threshold=0.3, iou_threshold=0.4):
+    boxes = []
+    confidences = []
+    class_ids = []
+
+    for pred in predictions[0]:  
+        # Debug: Print shape and content of pred[4]
+        print("Shape of pred[4]:", np.shape(pred[4]))
+        print("Contents of pred[4]:", pred[4])
+
+        # Ensure we extract a single float value correctly
+        if isinstance(pred[4], np.ndarray):
+            if pred[4].size == 1:
+                confidence = float(pred[4].item())  # Single-element array
+            else:
+                confidence = float(pred[4][0])  # Extract first element
+        else:
+            confidence = float(pred[4])  # Already a scalar
+
+        if confidence > conf_threshold:
+            x, y, w, h = pred[:4]
+            x1, y1, x2, y2 = int(x - w / 2), int(y - h / 2), int(x + w / 2), int(y + h / 2)
+            boxes.append([x1, y1, x2, y2])
+            class_id = int(pred[5][0]) if isinstance(pred[5], np.ndarray) else int(pred[5])
+            class_ids.append(class_id)
+            confidences.append(confidence)
+
+    if len(boxes) > 0:
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, conf_threshold, iou_threshold)
+        if len(indices) > 0:
+            indices = indices.flatten()  # Flatten indices array
+            return [(boxes[i], class_ids[i], confidences[i]) for i in indices]
+    return []
+
+# Start video capture loop
+while True:
+    # Capture an image
+    frame = picam2.capture_array()
+
+    # Convert to BGR (OpenCV format)
+    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+    # Resize and normalize image for YOLOv7
+    frame_resized = cv2.resize(frame_bgr, (INPUT_WIDTH, INPUT_HEIGHT))
+    blob = cv2.dnn.blobFromImage(frame_resized, scalefactor=1/255.0, size=(INPUT_WIDTH, INPUT_HEIGHT), swapRB=True, crop=False)
+
+    # Ensure correct data type
+    blob = blob.astype(np.float32)
+
+    # Perform inference using ONNX Runtime
+    outputs = session.run(None, {input_name: blob})
+
+    # Apply optimized NMS
+    detections = non_max_suppression(outputs, conf_threshold=0.3, iou_threshold=0.4)
+
+    # Loop through detections and draw boxes
+    for (box, cls_idx, conf) in detections:
+        x1, y1, x2, y2 = box
+        label = f"{class_names[cls_idx]} {conf:.2f}"
+        color = (0, 255, 0) if class_names[cls_idx] == "monkey" else (255, 0, 0)
+
+        # Draw bounding box and label
+        cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(frame_bgr, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+        # Play sound if monkey is detected
+        current_time = time.time()
+        if class_names[cls_idx] == "monkey" and (current_time - last_play_time > cooldown):
+            last_play_time = current_time
+            threading.Thread(target=play_sound).start()
+
+    # Resize for 5-inch display
+    frame_resized = cv2.resize(frame_bgr, (screen_width, screen_height))
+
+    # Show the result
+    cv2.imshow("YOLOv7 Detection", frame_resized)
+
+    # Exit on 'q' key press
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Stop camera and close OpenCV
+picam2.stop()
+cv2.destroyAllWindows()
